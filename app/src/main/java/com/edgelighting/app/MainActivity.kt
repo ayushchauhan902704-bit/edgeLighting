@@ -12,10 +12,11 @@ import android.provider.Settings
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+
 import com.google.android.material.switchmaterial.SwitchMaterial
 
 class MainActivity : AppCompatActivity() {
@@ -32,22 +33,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnTestGreen: Button
     private lateinit var btnTestRed: Button
 
-    // Android 13+ notification permission launcher
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        updatePermissionStatus()
-    }
+    ) { updatePermissionStatus() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
         initializeViews()
         setupClickListeners()
         updatePermissionStatus()
-        
-        // Request notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasPostNotificationPermission()) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -74,197 +69,83 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupClickListeners() {
-        btnStartService.setOnClickListener {
-            startEdgeLightingService()
-        }
-
-        btnStopService.setOnClickListener {
-            stopEdgeLightingService()
-        }
-
-        btnNotificationAccess.setOnClickListener {
-            requestNotificationListenerPermission()
-        }
-
+        btnStartService.setOnClickListener { startEdgeLightingService() }
+        btnStopService.setOnClickListener { stopEdgeLightingService() }
+        btnNotificationAccess.setOnClickListener { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
         btnOverlayPermission.setOnClickListener {
-            requestOverlayPermission()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                startActivity(intent)
+            }
         }
-
-        btnTestBlue.setOnClickListener {
-            testEdgeLighting(Color.BLUE)
-        }
-
-        btnTestGreen.setOnClickListener {
-            testEdgeLighting(Color.GREEN)
-        }
-
-        btnTestRed.setOnClickListener {
-            testEdgeLighting(Color.RED)
-        }
+        btnTestBlue.setOnClickListener { testEdgeLighting(Color.BLUE) }
+        btnTestGreen.setOnClickListener { testEdgeLighting(Color.GREEN) }
+        btnTestRed.setOnClickListener { testEdgeLighting(Color.RED) }
 
         switchEnabled.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
-                if (hasAllPermissions()) {
-                    startEdgeLightingService()
-                } else {
+                if (hasAllPermissions()) startEdgeLightingService() else {
                     switchEnabled.isChecked = false
-                    showPermissionRequiredMessage()
+                    Toast.makeText(this, "Pehle dono permissions Grant karo", Toast.LENGTH_SHORT).show()
                 }
-            } else {
-                stopEdgeLightingService()
-            }
+            } else stopEdgeLightingService()
         }
     }
 
     private fun startEdgeLightingService() {
-        if (!hasAllPermissions()) {
-            showPermissionRequiredMessage()
-            return
-        }
-
-        val intent = Intent(this, EdgeLightingService::class.java).apply {
-            action = EdgeLightingService.ACTION_START_SERVICE
-        }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-        
-        updateServiceStatus()
+        if (!hasAllPermissions()) { Toast.makeText(this, "Permissions baki hai", Toast.LENGTH_SHORT).show(); return }
+        val intent = Intent(this, EdgeLightingService::class.java).apply { action = EdgeLightingService.ACTION_START_SERVICE }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+        tvServiceStatus.text = "Service Running - Notification ka wait kar raha hu"
+        switchEnabled.isChecked = true
     }
 
     private fun stopEdgeLightingService() {
-        val intent = Intent(this, EdgeLightingService::class.java).apply {
-            action = EdgeLightingService.ACTION_STOP_SERVICE
-        }
+        val intent = Intent(this, EdgeLightingService::class.java).apply { action = EdgeLightingService.ACTION_STOP_SERVICE }
         stopService(intent)
-        updateServiceStatus()
+        tvServiceStatus.text = "Service Stopped"
+        switchEnabled.isChecked = false
     }
 
     private fun testEdgeLighting(color: Int) {
-        if (!hasAllPermissions()) {
-            showPermissionRequiredMessage()
-            return
-        }
-
+        if (!hasOverlayPermission()) { Toast.makeText(this, "Overlay permission do", Toast.LENGTH_SHORT).show(); return }
         val intent = Intent(this, EdgeLightingService::class.java).apply {
             action = EdgeLightingService.ACTION_SHOW_EDGE_LIGHTING
             putExtra(EdgeLightingService.EXTRA_COLOR, color)
             putExtra(EdgeLightingService.EXTRA_DURATION, 3000L)
         }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-    }
-
-    private fun requestNotificationListenerPermission() {
-        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-        startActivity(intent)
-    }
-
-    private fun requestOverlayPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
-                data = Uri.parse("package:$packageName")
-            }
-            startActivity(intent)
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
     }
 
     private fun hasNotificationListenerPermission(): Boolean {
-        val componentName = ComponentName(this, EdgeNotificationListener::class.java)
-        val enabledListeners = Settings.Secure.getString(
-            contentResolver,
-            "enabled_notification_listeners"
-        )
-        return enabledListeners?.contains(componentName.flattenToString()) == true
+        val cn = ComponentName(this, EdgeNotificationListener::class.java)
+        val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+        return enabled?.contains(cn.flattenToString()) == true
     }
-
-    private fun hasOverlayPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(this)
-        } else {
-            true
-        }
-    }
-
-    private fun hasAllPermissions(): Boolean {
-        return hasNotificationListenerPermission() && 
-               hasOverlayPermission() && 
-               hasPostNotificationPermission()
-    }
-
-    private fun hasPostNotificationPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(
-                this, 
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
-    }
+    private fun hasOverlayPermission(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true
+    private fun hasPostNotificationPermission(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED else true
+    private fun hasAllPermissions(): Boolean = hasNotificationListenerPermission() && hasOverlayPermission()
 
     private fun updatePermissionStatus() {
-        // Update notification access status
-        val hasNotificationAccess = hasNotificationListenerPermission()
-        ivNotificationStatus.setImageResource(
-            if (hasNotificationAccess) android.R.drawable.ic_dialog_info
-            else android.R.drawable.ic_dialog_alert
-        )
-        ivNotificationStatus.setColorFilter(
-            ContextCompat.getColor(
-                this,
-                if (hasNotificationAccess) android.R.color.holo_green_dark
-                else android.R.color.holo_red_dark
-            )
-        )
-        btnNotificationAccess.text = if (hasNotificationAccess) "Granted" else "Grant"
-        btnNotificationAccess.isEnabled = !hasNotificationAccess
+        val hasNoti = hasNotificationListenerPermission()
+        ivNotificationStatus.setColorFilter(ContextCompat.getColor(this, if (hasNoti) android.R.color.holo_green_dark else android.R.color.holo_red_dark))
+        btnNotificationAccess.text = if (hasNoti) "Granted ✓" else "Grant"
+        btnNotificationAccess.isEnabled = !hasNoti
 
-        // Update overlay permission status
         val hasOverlay = hasOverlayPermission()
-        ivOverlayStatus.setImageResource(
-            if (hasOverlay) android.R.drawable.ic_dialog_info
-            else android.R.drawable.ic_dialog_alert
-        )
-        ivOverlayStatus.setColorFilter(
-            ContextCompat.getColor(
-                this,
-                if (hasOverlay) android.R.color.holo_green_dark
-                else android.R.color.holo_red_dark
-            )
-        )
-        btnOverlayPermission.text = if (hasOverlay) "Granted" else "Grant"
+        ivOverlayStatus.setColorFilter(ContextCompat.getColor(this, if (hasOverlay) android.R.color.holo_green_dark else android.R.color.holo_red_dark))
+        btnOverlayPermission.text = if (hasOverlay) "Granted ✓" else "Grant"
         btnOverlayPermission.isEnabled = !hasOverlay
 
-        // Update service controls
-        val allPermissionsGranted = hasAllPermissions()
-        btnStartService.isEnabled = allPermissionsGranted
-        switchEnabled.isEnabled = allPermissionsGranted
+        val all = hasAllPermissions()
+        btnStartService.isEnabled = all
+        switchEnabled.isEnabled = all
+        btnTestBlue.isEnabled = all
+        btnTestGreen.isEnabled = all
+        btnTestRed.isEnabled = all
     }
 
     private fun updateServiceStatus() {
-        // This is a simplified check - in a real app you might want to 
-        // implement a more robust service status checking mechanism
-        tvServiceStatus.text = if (switchEnabled.isChecked) {
-            "Service is running"
-        } else {
-            "Service is not running"
-        }
-    }
-
-    private fun showPermissionRequiredMessage() {
-        // You could show a dialog or toast here explaining why permissions are needed
-        android.widget.Toast.makeText(
-            this,
-            "Please grant all required permissions to use edge lighting",
-            android.widget.Toast.LENGTH_LONG
-        ).show()
+        tvServiceStatus.text = if (switchEnabled.isChecked) "Service is running" else "Service is not running"
     }
 }
