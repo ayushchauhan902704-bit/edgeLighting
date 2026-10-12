@@ -11,9 +11,10 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-      - run: chmod +x ./gradlew
+      - name: Accept Android Licenses
+        run: yes | sdkmanager --licenses || true
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
       - name: Upload Release APK
